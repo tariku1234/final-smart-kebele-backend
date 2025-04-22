@@ -35,7 +35,8 @@ uploadDirs.forEach((dir) => {
 })
 
 // Serve static files from the uploads directory
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")))
+// This makes the uploads directory accessible at /uploads
+app.use("/uploads", express.static(path.join(__dirname, "uploads")))
 
 // Connect to MongoDB
 mongoose
@@ -58,8 +59,9 @@ app.use("/api/blog", blogRoutes)
 
 // Serve static assets in production
 if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../build")))
-
+// In server.js
+// In server.js
+app.use("/uploads", express.static(path.join(__dirname, "uploads")))
   app.get("*", (req, res) => {
     res.sendFile(path.resolve(__dirname, "../build", "index.html"))
   })

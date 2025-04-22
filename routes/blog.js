@@ -2,6 +2,7 @@ const express = require("express")
 const router = express.Router()
 const multer = require("multer")
 const path = require("path")
+const fs = require("fs")
 const BlogPost = require("../models/BlogPost")
 const auth = require("../middleware/auth")
 const { USER_ROLES } = require("../config/constants")
@@ -9,25 +10,35 @@ const { USER_ROLES } = require("../config/constants")
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
+    // Ensure the directory exists
+    const uploadDir = path.join(__dirname, "../../uploads/blog")
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true })
+    }
     cb(null, "uploads/blog")
   },
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`)
+    // Create a unique filename to avoid conflicts
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9)
+    // Replace spaces with hyphens and remove special characters
+    const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.]/g, "-").toLowerCase()
+    cb(null, `${uniqueSuffix}-${sanitizedName}`)
   },
 })
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif/
+    // Allow images and videos
+    const allowedTypes = /jpeg|jpg|png|gif|mp4|webm|ogg/
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase())
     const mimetype = allowedTypes.test(file.mimetype)
 
     if (extname && mimetype) {
       return cb(null, true)
     } else {
-      cb(new Error("Invalid file type. Only JPEG, PNG, and GIF files are allowed."))
+      cb(new Error("Invalid file type. Only JPEG, PNG, GIF images and MP4, WebM, OGG videos are allowed."))
     }
   },
 })
@@ -56,7 +67,9 @@ router.post("/", auth, upload.single("featuredImage"), async (req, res) => {
 
     // Add featured image if uploaded
     if (req.file) {
-      blogPost.featuredImage = req.file.path
+      // Store the URL path that will be accessible from the frontend
+      // This path will be relative to the domain, e.g., /uploads/blog/filename.jpg
+      blogPost.featuredImage = `/uploads/blog/${req.file.filename}`
     }
 
     await blogPost.save()
@@ -89,7 +102,7 @@ router.get("/", async (req, res) => {
     }
 
     // Filter by category if provided
-    if (req.query.category) {
+    if (req.query.category && req.query.category !== "all") {
       query.category = req.query.category
     }
 
@@ -177,7 +190,8 @@ router.put("/:id", auth, upload.single("featuredImage"), async (req, res) => {
 
     // Update featured image if uploaded
     if (req.file) {
-      blogPost.featuredImage = req.file.path
+      // Store the URL path that will be accessible from the frontend
+      blogPost.featuredImage = `/uploads/blog/${req.file.filename}`
     }
 
     await blogPost.save()
@@ -208,7 +222,15 @@ router.delete("/:id", auth, async (req, res) => {
       return res.status(404).json({ message: "Blog post not found" })
     }
 
-    await blogPost.remove()
+    // Delete the image file if it exists
+    if (blogPost.featuredImage) {
+      const filePath = path.join(__dirname, "../../", blogPost.featuredImage.replace(/^\//, ""))
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath)
+      }
+    }
+
+    await BlogPost.deleteOne({ _id: req.params.id })
 
     res.json({ message: "Blog post removed" })
   } catch (err) {
@@ -218,4 +240,3 @@ router.delete("/:id", auth, async (req, res) => {
 })
 
 module.exports = router
-

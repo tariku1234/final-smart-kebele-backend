@@ -97,7 +97,9 @@ const storage = multer.diskStorage({
     cb(null, "uploads/complaints")
   },
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`)
+    // Use timestamp + sanitized filename to avoid conflicts
+    const sanitizedName = file.originalname.replace(/\s+/g, "-").toLowerCase()
+    cb(null, `${Date.now()}-${sanitizedName}`)
   },
 })
 
