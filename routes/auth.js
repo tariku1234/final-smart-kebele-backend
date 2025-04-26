@@ -72,6 +72,8 @@ router.post("/login", async (req, res) => {
       user: {
         id: user.id,
         role: user.role,
+        kifleketema: user.kifleketema,
+        wereda: user.wereda,
       },
     }
 
@@ -87,6 +89,8 @@ router.post("/login", async (req, res) => {
           lastName: user.lastName,
           email: user.email,
           role: user.role,
+          kifleketema: user.kifleketema,
+          wereda: user.wereda,
         },
       })
     })
@@ -207,4 +211,3 @@ router.post("/reset-password", async (req, res) => {
 })
 
 module.exports = router
-
