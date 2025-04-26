@@ -350,15 +350,25 @@ router.get("/", auth, async (req, res) => {
 
       // Only add location filters if they exist
       if (req.user.kifleketema) {
-        query.$or.forEach((condition) => {
-          condition.kifleketema = req.user.kifleketema
-        })
+        // Apply kifleketema filter to all conditions in $or
+        const kifleketemaFilter = req.user.kifleketema
+        query.$or = query.$or.map((condition) => ({
+          ...condition,
+          kifleketema: kifleketemaFilter,
+        }))
       }
 
       if (req.user.wereda) {
-        query.$or.forEach((condition) => {
-          condition.wereda = req.user.wereda
-        })
+        // Convert wereda to number to ensure consistent comparison
+        const weredaNum = Number(req.user.wereda)
+        if (!isNaN(weredaNum)) {
+          // Apply wereda filter to all conditions in $or
+          query.$or = query.$or.map((condition) => ({
+            ...condition,
+            wereda: weredaNum,
+          }))
+        }
+        console.log(`Filtering for wereda: ${weredaNum} (${typeof weredaNum})`)
       }
     } else if (req.user.role === USER_ROLES.KIFLEKETEMA_ANTI_CORRUPTION) {
       // Kifleketema officers can see complaints at their level or with their handler
@@ -369,9 +379,12 @@ router.get("/", auth, async (req, res) => {
 
       // Only add kifleketema filter if it exists
       if (req.user.kifleketema) {
-        query.$or.forEach((condition) => {
-          condition.kifleketema = req.user.kifleketema
-        })
+        // Apply kifleketema filter to all conditions in $or
+        const kifleketemaFilter = req.user.kifleketema
+        query.$or = query.$or.map((condition) => ({
+          ...condition,
+          kifleketema: kifleketemaFilter,
+        }))
       }
     } else if (req.user.role === USER_ROLES.KENTIBA_BIRO) {
       // Kentiba Biro can see all complaints
@@ -403,12 +416,15 @@ router.get("/", auth, async (req, res) => {
     // Debug: Log the complaints that were found
     if (complaints.length > 0) {
       console.log(
-        "Complaint stages:",
-        complaints.map((c) => ({
+        "Complaint sample:",
+        complaints.slice(0, 2).map((c) => ({
           id: c._id,
           stage: c.currentStage,
           handler: c.currentHandler,
           status: c.status,
+          kifleketema: c.kifleketema,
+          wereda: c.wereda,
+          weredaType: typeof c.wereda,
         })),
       )
     }
@@ -465,7 +481,15 @@ router.get("/:id", auth, async (req, res) => {
       // Wereda officers can view complaints at their level
       // Only check location if user has location data
       if (req.user.kifleketema && req.user.wereda) {
-        hasPermission = complaint.kifleketema === req.user.kifleketema && complaint.wereda === req.user.wereda
+        // Convert wereda to number for consistent comparison
+        const userWereda = Number(req.user.wereda)
+        const complaintWereda = Number(complaint.wereda)
+
+        hasPermission = complaint.kifleketema === req.user.kifleketema && complaintWereda === userWereda
+
+        console.log(
+          `Permission check: User wereda=${userWereda}, Complaint wereda=${complaintWereda}, Match=${hasPermission}`,
+        )
       } else {
         hasPermission = true // If no location data, allow access
       }
