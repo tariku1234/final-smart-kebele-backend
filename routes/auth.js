@@ -67,6 +67,19 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" })
     }
 
+    // Check if user is approved (for stakeholders and administrators)
+    if (
+      ["stakeholder_office", "wereda_anti_corruption", "kifleketema_anti_corruption"].includes(user.role) &&
+      !user.isApproved
+    ) {
+      return res.status(403).json({
+        message:
+          user.role === "stakeholder_office"
+            ? "Your stakeholder account is pending approval from an administrator"
+            : "Your administrator account is pending approval from Kentiba Biro",
+      })
+    }
+
     // Create and sign JWT token
     const payload = {
       user: {

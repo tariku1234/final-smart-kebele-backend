@@ -36,8 +36,8 @@ router.post("/register-admin", async (req, res) => {
       return res.status(400).json({ message: "ID number is already registered" })
     }
 
-    // Validate location information
-    if (!kifleketema) {
+    // Validate location information - Kifleketema is NOT required for kentiba_biro
+    if (role !== "kentiba_biro" && !kifleketema) {
       return res.status(400).json({ message: "Kifleketema (sub-city) is required" })
     }
 
@@ -46,8 +46,8 @@ router.post("/register-admin", async (req, res) => {
       return res.status(400).json({ message: "Wereda (district) is required for Wereda administrators" })
     }
 
-    // Create new admin user
-    user = new User({
+    // Create new admin user with appropriate fields based on role
+    const userData = {
       firstName,
       lastName,
       email,
@@ -56,12 +56,15 @@ router.post("/register-admin", async (req, res) => {
       idNumber,
       address,
       role,
-      kifleketema,
-      wereda: role === "wereda_anti_corruption" ? wereda : undefined,
+      // Only include kifleketema for non-kentiba_biro roles
+      ...(role !== "kentiba_biro" && { kifleketema }),
+      // Only include wereda for wereda_anti_corruption role
+      ...(role === "wereda_anti_corruption" && { wereda }),
       // Kentiba Biro is automatically approved, others need approval
       isApproved: role === "kentiba_biro",
-    })
+    }
 
+    user = new User(userData)
     await user.save()
 
     res.status(201).json({
