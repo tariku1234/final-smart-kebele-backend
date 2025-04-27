@@ -11,11 +11,11 @@ const { USER_ROLES } = require("../config/constants")
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     // Ensure the directory exists with absolute path
-    const uploadDir = path.join(__dirname, "../../public/uploads/blog")
+    const uploadDir = path.join(__dirname, "../../uploads/blog")
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true })
     }
-    cb(null, "public/uploads/blog")
+    cb(null, "uploads/blog")
   },
   filename: (req, file, cb) => {
     // Create a unique filename to avoid conflicts
