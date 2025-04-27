@@ -34,6 +34,54 @@ router.get("/types", async (req, res) => {
   }
 })
 
+// @route   GET api/offices/available-types
+// @desc    Get available office types for a specific kifleketema and wereda
+// @access  Private
+router.get("/available-types", auth, async (req, res) => {
+  try {
+    const { kifleketema, wereda } = req.query
+
+    if (!kifleketema || !wereda) {
+      return res.status(400).json({ message: "Kifle Ketema and Wereda are required" })
+    }
+
+    // Get all office types
+    const officeTypes = [
+      { value: "trade_office", label: "Trade Office" },
+      { value: "id_office", label: "ID Office" },
+      { value: "land_office", label: "Land Office" },
+      { value: "tax_office", label: "Tax Office" },
+      { value: "court_office", label: "Court Office" },
+      { value: "police_office", label: "Police Office" },
+      { value: "education_office", label: "Education Office" },
+      { value: "health_office", label: "Health Office" },
+      { value: "transport_office", label: "Transport Office" },
+      { value: "water_office", label: "Water Office" },
+      { value: "electricity_office", label: "Electricity Office" },
+      { value: "telecom_office", label: "Telecom Office" },
+      { value: "immigration_office", label: "Immigration Office" },
+      { value: "social_affairs_office", label: "Social Affairs Office" },
+      { value: "other", label: "Other Office" },
+    ]
+
+    // Find existing office types in this kifleketema and wereda
+    const existingOffices = await Office.find({
+      kifleketema,
+      wereda: Number(wereda),
+    }).select("officeType")
+
+    const existingTypes = existingOffices.map((office) => office.officeType)
+
+    // Filter out existing types
+    const availableTypes = officeTypes.filter((type) => !existingTypes.includes(type.value))
+
+    res.json({ availableTypes, existingTypes })
+  } catch (err) {
+    console.error("Get available office types error:", err)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
 // @route   GET api/offices
 // @desc    Get all offices
 // @access  Public
@@ -126,6 +174,19 @@ router.post("/", auth, async (req, res) => {
       afternoonStatus,
     } = req.body
 
+    // Check if an office of this type already exists in this kifleketema and wereda
+    const existingOffice = await Office.findOne({
+      officeType,
+      kifleketema,
+      wereda: Number(wereda),
+    })
+
+    if (existingOffice) {
+      return res.status(400).json({
+        message: `An office of type "${officeType}" already exists in this location. Please edit the existing office instead.`,
+      })
+    }
+
     // Create new office
     const office = new Office({
       name,
@@ -183,6 +244,22 @@ router.put("/:id", auth, async (req, res) => {
     }
 
     const { name, description, location, hours, contact, status, officeType, morningStatus, afternoonStatus } = req.body
+
+    // If office type is being changed, check if an office of the new type already exists
+    if (officeType && officeType !== office.officeType) {
+      const existingOffice = await Office.findOne({
+        officeType,
+        kifleketema: office.kifleketema,
+        wereda: office.wereda,
+        _id: { $ne: office._id }, // Exclude the current office
+      })
+
+      if (existingOffice) {
+        return res.status(400).json({
+          message: `An office of type "${officeType}" already exists in this location. Please edit the existing office instead.`,
+        })
+      }
+    }
 
     // Update office
     if (name) office.name = name
