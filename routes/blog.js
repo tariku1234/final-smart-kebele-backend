@@ -10,12 +10,12 @@ const { USER_ROLES } = require("../config/constants")
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Ensure the directory exists
-    const uploadDir = path.join(__dirname, "../../uploads/blog")
+    // Ensure the directory exists with absolute path
+    const uploadDir = path.join(__dirname, "../../public/uploads/blog")
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true })
     }
-    cb(null, "uploads/blog")
+    cb(null, "public/uploads/blog")
   },
   filename: (req, file, cb) => {
     // Create a unique filename to avoid conflicts
@@ -43,6 +43,19 @@ const upload = multer({
   },
 })
 
+// Add specific routes BEFORE the parameterized routes
+// @route   GET api/blog/create
+// @desc    Get blog creation page (if needed)
+// @access  Private (Kentiba Biro only)
+router.get("/create", auth, (req, res) => {
+  // This route is just to handle the conflict
+  // The actual creation happens in the POST / route
+  if (req.user.role !== USER_ROLES.KENTIBA_BIRO) {
+    return res.status(403).json({ message: "Not authorized" })
+  }
+  res.json({ message: "Blog creation page" })
+})
+
 // @route   POST api/blog
 // @desc    Create a new blog post
 // @access  Private (Kentiba Biro only)
@@ -54,6 +67,10 @@ router.post("/", auth, upload.single("featuredImage"), async (req, res) => {
     }
 
     const { title, content, category, tags, isPublished } = req.body
+
+    if (!title || !content) {
+      return res.status(400).json({ message: "Title and content are required" })
+    }
 
     // Create new blog post
     const blogPost = new BlogPost({
@@ -74,13 +91,16 @@ router.post("/", auth, upload.single("featuredImage"), async (req, res) => {
 
     await blogPost.save()
 
+    // Populate the author field before sending the response
+    await blogPost.populate("author", "firstName lastName")
+
     res.status(201).json({
       message: "Blog post created successfully",
       blogPost,
     })
   } catch (err) {
-    console.error("Create blog post error:", err)
-    res.status(500).json({ message: "Server error" })
+    console.error("Create blog post error:", err.message, err.stack)
+    res.status(500).json({ message: "Server error", error: err.message })
   }
 })
 
@@ -144,6 +164,11 @@ router.get("/", async (req, res) => {
 // @access  Public
 router.get("/:id", async (req, res) => {
   try {
+    // Check if the ID is a valid MongoDB ObjectId
+    if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid blog post ID format" })
+    }
+
     const blogPost = await BlogPost.findById(req.params.id).populate("author", "firstName lastName")
 
     if (!blogPost) {
@@ -170,6 +195,11 @@ router.put("/:id", auth, upload.single("featuredImage"), async (req, res) => {
     // Check if user is Kentiba Biro
     if (req.user.role !== USER_ROLES.KENTIBA_BIRO) {
       return res.status(403).json({ message: "Not authorized" })
+    }
+
+    // Check if the ID is a valid MongoDB ObjectId
+    if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid blog post ID format" })
     }
 
     const { title, content, category, tags, isPublished } = req.body
@@ -214,6 +244,11 @@ router.delete("/:id", auth, async (req, res) => {
     // Check if user is Kentiba Biro
     if (req.user.role !== USER_ROLES.KENTIBA_BIRO) {
       return res.status(403).json({ message: "Not authorized" })
+    }
+
+    // Check if the ID is a valid MongoDB ObjectId
+    if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: "Invalid blog post ID format" })
     }
 
     const blogPost = await BlogPost.findById(req.params.id)
