@@ -732,7 +732,7 @@ router.post("/:id/escalate", auth, async (req, res) => {
     // Update complaint
     complaint.currentStage = nextStage
     complaint.currentHandler = nextHandler
-    complaint.status = COMPLAINT_STATUS.PENDING // Set to pending for the new handler
+    complaint.status = COMPLAINT_STATUS.ESCALATED // Set to ESCALATED instead of PENDING when escalating
     complaint.updatedAt = now
 
     // Set new due date if applicable
@@ -841,6 +841,7 @@ router.post("/:id/escalate", auth, async (req, res) => {
     // Log the escalation for debugging
     console.log(`Escalating complaint ${complaint._id} from ${complaint.currentStage} to ${nextStage}`)
     console.log(`New handler: ${nextHandler}`)
+    console.log(`Status set to: ${complaint.status}`)
 
     await complaint.save()
 

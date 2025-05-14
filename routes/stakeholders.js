@@ -193,7 +193,7 @@ router.put("/:id/reject", auth, async (req, res) => {
     }
 
     // Delete the stakeholder
-    await stakeholder.remove()
+    await User.deleteOne({ _id: req.params.id })
 
     res.json({ message: "Stakeholder office rejected and removed" })
   } catch (err) {

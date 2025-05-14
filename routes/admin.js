@@ -170,7 +170,7 @@ router.put("/:id/reject", auth, async (req, res) => {
     }
 
     // Delete the admin
-    await admin.remove()
+    await User.deleteOne({ _id: req.params.id })
 
     res.json({ message: "Administrator rejected and removed" })
   } catch (err) {
