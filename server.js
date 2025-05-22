@@ -17,6 +17,7 @@ const officeRoutes = require("./routes/offices")
 const stakeholderRoutes = require("./routes/stakeholders")
 const blogRoutes = require("./routes/blog")
 const adminRoutes = require("./routes/admin")
+const reportRoutes = require("./routes/reports") // Add the new reports route
 
 // Initialize Express app
 const app = express()
@@ -56,12 +57,13 @@ app.use("/api/alerts", alertRoutes)
 app.use("/api/offices", officeRoutes)
 app.use("/api/stakeholders", stakeholderRoutes)
 app.use("/api/blog", blogRoutes)
+app.use("/api/reports", reportRoutes) // Register the new reports route
 
 // Serve static assets in production
 if (process.env.NODE_ENV === "production") {
-// In server.js
-// In server.js
-app.use("/uploads", express.static(path.join(__dirname, "uploads")))
+  // In server.js
+  // In server.js
+  app.use("/uploads", express.static(path.join(__dirname, "uploads")))
   app.get("*", (req, res) => {
     res.sendFile(path.resolve(__dirname, "../build", "index.html"))
   })
