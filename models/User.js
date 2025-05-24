@@ -95,10 +95,18 @@ const UserSchema = new mongoose.Schema({
   officePhone: {
     type: String,
   },
+  // Legacy reset code fields (keeping for backward compatibility)
   resetCode: {
     type: String,
   },
   resetCodeExpires: {
+    type: Date,
+  },
+  // New secure reset token fields
+  resetPasswordToken: {
+    type: String,
+  },
+  resetPasswordExpires: {
     type: Date,
   },
   isApproved: {

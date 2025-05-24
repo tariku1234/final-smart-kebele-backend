@@ -1,7 +1,7 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "description": "",
+  "description": "Backend for password reset functionality",
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
@@ -17,10 +17,12 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.12.1",
-    "multer": "^1.4.5-lts.2",
-    "node-cron": "^3.0.3"
+    "multer": "^2.0.0",
+    "node-cron": "^4.0.7",
+    "nodemailer": "^6.10.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"
