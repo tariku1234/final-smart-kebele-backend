@@ -861,7 +861,6 @@ router.post("/:id/escalate", auth, async (req, res) => {
 router.post("/:id/respond", auth, async (req, res) => {
   try {
     const { response, internalComment } = req.body
-    // Remove status from the request body - only citizens can change status
 
     // Check if user has the right role to respond
     if (
@@ -945,21 +944,36 @@ router.post("/:id/respond", auth, async (req, res) => {
       })
     }
 
-    // Add response - always set status to "in_progress" when an admin responds
-    // Only citizens can change to "resolved" or "escalated"
+    // FIXED: Preserve escalated status when responding to escalated complaints
+    // Determine the new status based on current status and stage
+    let newStatus
+    
+    // If the complaint was escalated, keep it as escalated until citizen takes action
+    if (complaint.status === COMPLAINT_STATUS.ESCALATED) {
+      newStatus = COMPLAINT_STATUS.ESCALATED
+      console.log("Preserving escalated status after admin response")
+    } else {
+      // For non-escalated complaints, set to in_progress when admin responds
+      newStatus = COMPLAINT_STATUS.IN_PROGRESS
+      console.log("Setting status to in_progress for non-escalated complaint")
+    }
+
+    // Add response
     complaint.responses.push({
       responder: req.user.id,
       responderRole: complaint.currentHandler,
       response,
-      status: COMPLAINT_STATUS.IN_PROGRESS, // Always set to in_progress
+      status: newStatus, // Use the determined status
       internalComment,
       stage: complaint.currentStage, // Add the current stage to the response
       createdAt: new Date(),
     })
 
-    // Update complaint status to in_progress
-    complaint.status = COMPLAINT_STATUS.IN_PROGRESS
+    // Update complaint status
+    complaint.status = newStatus
     complaint.updatedAt = new Date()
+
+    console.log(`Updated complaint status to: ${complaint.status}`)
 
     await complaint.save()
 

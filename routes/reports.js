@@ -4,70 +4,76 @@ const Complaint = require("../models/Complaint")
 const User = require("../models/User")
 const OfficePerformance = require("../models/OfficePerformance")
 const auth = require("../middleware/auth")
-const { USER_ROLES, COMPLAINT_STATUS } = require("../config/constants")
-
-// Helper function to get date range based on period
-const getDateRange = (period) => {
-  const now = new Date()
-  const startDate = new Date()
-
-  switch (period) {
-    case "daily":
-      startDate.setHours(0, 0, 0, 0) // Start of today
-      break
-    case "weekly":
-      startDate.setDate(now.getDate() - 7) // 7 days ago
-      break
-    case "monthly":
-      startDate.setMonth(now.getMonth() - 1) // 1 month ago
-      break
-    case "quarterly":
-      startDate.setMonth(now.getMonth() - 3) // 3 months ago
-      break
-    case "yearly":
-      startDate.setFullYear(now.getFullYear() - 1) // 1 year ago
-      break
-    default:
-      startDate.setFullYear(2000) // Default to all time
-  }
-
-  return { startDate, endDate: now }
-}
+const { USER_ROLES } = require("../config/constants")
 
 // @route   GET api/reports/complaints
-// @desc    Get comprehensive complaint statistics with filters
-// @access  Private (Admin roles only)
+// @desc    Get complaint statistics for reports
+// @access  Private (Admin only)
 router.get("/complaints", auth, async (req, res) => {
   try {
-    // Check if user has admin role
+    // Check if user is an admin
     if (req.user.role === USER_ROLES.CITIZEN) {
-      return res.status(403).json({ message: "Not authorized to access reports" })
+      return res.status(403).json({ message: "Not authorized" })
     }
 
-    // Extract query parameters
-    const {
-      period = "all",
-      kifleketema,
-      wereda,
-      officeType,
-      startDate: customStartDate,
-      endDate: customEndDate,
-    } = req.query
+    const { period, kifleketema, wereda, officeType, startDate, endDate } = req.query
 
-    // Build query object
+    // Build query based on filters
     const query = {}
+    let dateFilter = {}
 
-    // Apply date filters
-    if (customStartDate && customEndDate) {
-      // Custom date range if provided
-      query.submittedAt = {
-        $gte: new Date(customStartDate),
-        $lte: new Date(customEndDate),
-      }
-    } else {
-      // Predefined period
-      const { startDate, endDate } = getDateRange(period)
-      query.submittedAt = { $gte: startDate, $lte: endDate }
+    // Apply date filter based on period
+    const now = new Date()
+    switch (period) {
+      case "daily":
+        dateFilter = {
+          submittedAt: {
+            $gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+            $lt: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
+          },
+        }
+        break
+      case "weekly":
+        dateFilter = {
+          submittedAt: {
+            $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+          },
+        }
+        break
+      case "monthly":
+        dateFilter = {
+          submittedAt: {
+            $gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+          },
+        }
+        break
+      case "quarterly":
+        dateFilter = {
+          submittedAt: {
+            $gte: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000),
+          },
+        }
+        break
+      case "yearly":
+        dateFilter = {
+          submittedAt: {
+            $gte: new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000),
+          },
+        }
+        break
+      case "custom":
+        if (startDate && endDate) {
+          dateFilter = {
+            submittedAt: {
+              $gte: new Date(startDate),
+              $lte: new Date(new Date(endDate).getTime() + 24 * 60 * 60 * 1000 - 1),
+            },
+          }
+        }
+        break
+      default:
+        // No date filter for "all"
+        break
     }
 
     // Apply location filters
@@ -76,15 +82,15 @@ router.get("/complaints", auth, async (req, res) => {
     }
 
     if (wereda) {
-      query.wereda = Number(wereda)
+      query.wereda = Number.parseInt(wereda)
     }
 
-    // Apply office type filter if provided
+    // Apply office type filter by finding stakeholder offices of that type
     if (officeType) {
-      // Find stakeholder offices of the specified type
       const stakeholderOffices = await User.find({
-        officeType,
         role: USER_ROLES.STAKEHOLDER_OFFICE,
+        officeType: officeType,
+        isApproved: true,
       }).select("_id")
 
       if (stakeholderOffices.length > 0) {
@@ -92,7 +98,7 @@ router.get("/complaints", auth, async (req, res) => {
           $in: stakeholderOffices.map((office) => office._id),
         }
       } else {
-        // No matching offices found
+        // No offices of this type found, return empty results
         return res.json({
           totalComplaints: 0,
           statusBreakdown: {
@@ -101,240 +107,227 @@ router.get("/complaints", auth, async (req, res) => {
             resolved: 0,
             escalated: 0,
           },
-          stageBreakdown: {},
-          handlerBreakdown: {},
-          timelineData: [],
           kifleketemaBreakdown: {},
-          weredaBreakdown: {},
           officeTypeBreakdown: {},
+          timelineData: [],
         })
       }
     }
 
-    // Apply role-based restrictions
-    if (req.user.role === USER_ROLES.STAKEHOLDER_OFFICE) {
-      query.stakeholderOffice = req.user.id
-    } else if (req.user.role === USER_ROLES.WEREDA_ANTI_CORRUPTION && req.user.kifleketema && req.user.wereda) {
-      query.kifleketema = req.user.kifleketema
-      query.wereda = Number(req.user.wereda)
-    } else if (req.user.role === USER_ROLES.KIFLEKETEMA_ANTI_CORRUPTION && req.user.kifleketema) {
-      query.kifleketema = req.user.kifleketema
-    }
+    // Combine query with date filter
+    const finalQuery = { ...query, ...dateFilter }
 
-    console.log("Report query:", JSON.stringify(query, null, 2))
+    console.log("Reports query:", JSON.stringify(finalQuery, null, 2))
 
-    // Get all complaints matching the query
-    const complaints = await Complaint.find(query).populate("stakeholderOffice", "officeName officeType").lean()
+    // Get total complaints
+    const totalComplaints = await Complaint.countDocuments(finalQuery)
 
-    // Calculate total complaints
-    const totalComplaints = complaints.length
-
-    // Status breakdown
+    // Get status breakdown - FIXED: Using correct status values
     const statusBreakdown = {
-      pending: 0,
-      inProgress: 0,
-      resolved: 0,
-      escalated: 0,
+      pending: await Complaint.countDocuments({ ...finalQuery, status: "pending" }),
+      inProgress: await Complaint.countDocuments({ ...finalQuery, status: "in_progress" }), // Fixed: was "in_progress"
+      resolved: await Complaint.countDocuments({ ...finalQuery, status: "resolved" }),
+      escalated: await Complaint.countDocuments({ ...finalQuery, status: "escalated" }),
     }
 
-    // Stage breakdown
-    const stageBreakdown = {}
+    console.log("Status breakdown:", statusBreakdown)
 
-    // Handler breakdown
-    const handlerBreakdown = {}
+    // Get kifleketema breakdown
+    const kifleketemaAggregation = await Complaint.aggregate([
+      { $match: finalQuery },
+      {
+        $group: {
+          _id: "$kifleketema",
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { count: -1 } },
+    ])
 
-    // Kifleketema breakdown
     const kifleketemaBreakdown = {}
+    kifleketemaAggregation.forEach((item) => {
+      const displayName = item._id.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
+      kifleketemaBreakdown[displayName] = item.count
+    })
 
-    // Wereda breakdown
-    const weredaBreakdown = {}
+    // Get office type breakdown
+    const officeTypeAggregation = await Complaint.aggregate([
+      { $match: finalQuery },
+      {
+        $lookup: {
+          from: "users",
+          localField: "stakeholderOffice",
+          foreignField: "_id",
+          as: "office",
+        },
+      },
+      { $unwind: "$office" },
+      {
+        $group: {
+          _id: "$office.officeType",
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { count: -1 } },
+    ])
 
-    // Office type breakdown
     const officeTypeBreakdown = {}
-
-    // Timeline data (complaints per day)
-    const timelineData = []
-    const dateMap = new Map()
-
-    // Process each complaint
-    complaints.forEach((complaint) => {
-      // Status breakdown
-      statusBreakdown[complaint.status]++
-
-      // Stage breakdown
-      if (!stageBreakdown[complaint.currentStage]) {
-        stageBreakdown[complaint.currentStage] = 0
-      }
-      stageBreakdown[complaint.currentStage]++
-
-      // Handler breakdown
-      if (!handlerBreakdown[complaint.currentHandler]) {
-        handlerBreakdown[complaint.currentHandler] = 0
-      }
-      handlerBreakdown[complaint.currentHandler]++
-
-      // Kifleketema breakdown
-      const kifleketemaName = complaint.kifleketema.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
-      if (!kifleketemaBreakdown[kifleketemaName]) {
-        kifleketemaBreakdown[kifleketemaName] = 0
-      }
-      kifleketemaBreakdown[kifleketemaName]++
-
-      // Wereda breakdown
-      const weredaKey = `Wereda ${complaint.wereda}`
-      if (!weredaBreakdown[weredaKey]) {
-        weredaBreakdown[weredaKey] = 0
-      }
-      weredaBreakdown[weredaKey]++
-
-      // Office type breakdown
-      if (complaint.stakeholderOffice && complaint.stakeholderOffice.officeType) {
-        const officeType = complaint.stakeholderOffice.officeType
-          .replace(/_/g, " ")
-          .replace(/\b\w/g, (l) => l.toUpperCase())
-        if (!officeTypeBreakdown[officeType]) {
-          officeTypeBreakdown[officeType] = 0
-        }
-        officeTypeBreakdown[officeType]++
-      }
-
-      // Timeline data
-      const submittedDate = new Date(complaint.submittedAt).toISOString().split("T")[0]
-      if (!dateMap.has(submittedDate)) {
-        dateMap.set(submittedDate, 0)
-      }
-      dateMap.set(submittedDate, dateMap.get(submittedDate) + 1)
+    officeTypeAggregation.forEach((item) => {
+      const displayName = item._id.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
+      officeTypeBreakdown[displayName] = item.count
     })
 
-    // Convert timeline data map to array
-    dateMap.forEach((count, date) => {
-      timelineData.push({ date, count })
-    })
+    // Get timeline data
+    let timelineData = []
+    if (period && period !== "all") {
+      const timelineAggregation = await Complaint.aggregate([
+        { $match: finalQuery },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: period === "daily" ? "%Y-%m-%d" : "%Y-%m-%d",
+                date: "$submittedAt",
+              },
+            },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ])
 
-    // Sort timeline data by date
-    timelineData.sort((a, b) => new Date(a.date) - new Date(b.date))
+      timelineData = timelineAggregation.map((item) => ({
+        date: item._id,
+        count: item.count,
+      }))
+    }
 
-    // Calculate average resolution time
-    let totalResolutionTime = 0
-    let resolvedCount = 0
-
-    complaints.forEach((complaint) => {
-      if (complaint.status === COMPLAINT_STATUS.RESOLVED && complaint.resolution && complaint.resolution.resolvedAt) {
-        const submittedAt = new Date(complaint.submittedAt)
-        const resolvedAt = new Date(complaint.resolution.resolvedAt)
-        const resolutionTime = (resolvedAt - submittedAt) / (1000 * 60 * 60 * 24) // in days
-        totalResolutionTime += resolutionTime
-        resolvedCount++
-      }
-    })
-
-    const averageResolutionTime = resolvedCount > 0 ? totalResolutionTime / resolvedCount : 0
-
-    // Calculate escalation rate
-    const escalationRate = totalComplaints > 0 ? (statusBreakdown.escalated / totalComplaints) * 100 : 0
-
-    // Return the compiled statistics
     res.json({
       totalComplaints,
       statusBreakdown,
-      stageBreakdown,
-      handlerBreakdown,
-      timelineData,
       kifleketemaBreakdown,
-      weredaBreakdown,
       officeTypeBreakdown,
-      averageResolutionTime,
-      escalationRate,
+      timelineData,
     })
   } catch (err) {
-    console.error("Report generation error:", err)
+    console.error("Get complaint reports error:", err)
     res.status(500).json({ message: "Server error" })
   }
 })
 
 // @route   GET api/reports/performance
-// @desc    Get office performance metrics
-// @access  Private (Admin roles only)
+// @desc    Get office performance data
+// @access  Private (Admin only)
 router.get("/performance", auth, async (req, res) => {
   try {
-    // Check if user has admin role
+    // Check if user is an admin
     if (req.user.role === USER_ROLES.CITIZEN) {
-      return res.status(403).json({ message: "Not authorized to access reports" })
+      return res.status(403).json({ message: "Not authorized" })
     }
 
-    // Extract query parameters
     const { kifleketema, wereda, officeType } = req.query
 
-    // Build query object
-    const query = {}
-
-    // Apply filters for office lookup
-    const officeQuery = {}
+    // Build query for offices
+    const officeQuery = {
+      role: USER_ROLES.STAKEHOLDER_OFFICE,
+      isApproved: true,
+    }
 
     if (kifleketema) {
       officeQuery.kifleketema = kifleketema
     }
 
     if (wereda) {
-      officeQuery.wereda = Number(wereda)
+      officeQuery.wereda = Number.parseInt(wereda)
     }
 
     if (officeType) {
       officeQuery.officeType = officeType
     }
 
-    // Apply role-based restrictions
-    if (req.user.role === USER_ROLES.STAKEHOLDER_OFFICE) {
-      officeQuery._id = req.user.id
-    } else if (req.user.role === USER_ROLES.WEREDA_ANTI_CORRUPTION && req.user.kifleketema && req.user.wereda) {
-      officeQuery.kifleketema = req.user.kifleketema
-      officeQuery.wereda = Number(req.user.wereda)
-    } else if (req.user.role === USER_ROLES.KIFLEKETEMA_ANTI_CORRUPTION && req.user.kifleketema) {
-      officeQuery.kifleketema = req.user.kifleketema
-    }
+    console.log("Office performance query:", JSON.stringify(officeQuery, null, 2))
 
-    // Find offices matching the criteria
-    const offices = await User.find({
-      ...officeQuery,
-      role: { $ne: USER_ROLES.CITIZEN }, // Exclude citizens
-    }).select("_id officeName officeType kifleketema wereda")
+    // Get offices
+    const offices = await User.find(officeQuery).select(
+      "officeName officeType kifleketema wereda officeAddress officePhone",
+    )
 
-    if (offices.length === 0) {
-      return res.json({ offices: [] })
-    }
+    console.log("Found offices:", offices.length)
 
-    // Get office IDs
-    const officeIds = offices.map((office) => office._id)
+    // Get performance data for each office
+    const performanceData = await Promise.all(
+      offices.map(async (office) => {
+        // Get total complaints for this office
+        const totalComplaints = await Complaint.countDocuments({
+          stakeholderOffice: office._id,
+        })
 
-    // Find performance metrics for these offices
-    const performanceMetrics = await OfficePerformance.find({
-      office: { $in: officeIds },
-    }).populate("office", "officeName officeType kifleketema wereda")
+        // Get resolved complaints
+        const resolvedComplaints = await Complaint.countDocuments({
+          stakeholderOffice: office._id,
+          status: "resolved",
+        })
 
-    // Compile performance data
-    const officePerformance = performanceMetrics.map((metric) => {
-      const office = metric.office || {}
+        // Get escalated complaints (complaints that moved beyond stakeholder level)
+        const escalatedComplaints = await Complaint.countDocuments({
+          stakeholderOffice: office._id,
+          status: "escalated",
+        })
 
-      return {
-        officeId: metric.office?._id || "Unknown",
-        officeName: office.officeName || "Unknown Office",
-        officeType: office.officeType?.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) || "Unknown Type",
-        kifleketema: office.kifleketema?.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) || "N/A",
-        wereda: office.wereda || "N/A",
-        totalComplaints: metric.totalComplaints || 0,
-        resolvedComplaints: metric.resolvedComplaints || 0,
-        escalatedComplaints: metric.escalatedComplaints || 0,
-        averageResolutionTime: metric.averageResolutionTime || 0,
-        responseRate:
-          metric.totalComplaints > 0 ? ((metric.resolvedComplaints / metric.totalComplaints) * 100).toFixed(1) : 0,
-        escalationRate:
-          metric.totalComplaints > 0 ? ((metric.escalatedComplaints / metric.totalComplaints) * 100).toFixed(1) : 0,
-      }
+        // Get complaints with responses (response rate)
+        const complaintsWithResponses = await Complaint.countDocuments({
+          stakeholderOffice: office._id,
+          "responses.0": { $exists: true },
+        })
+
+        // Calculate metrics
+        const responseRate =
+          totalComplaints > 0 ? ((complaintsWithResponses / totalComplaints) * 100).toFixed(1) : "0.0"
+        const escalationRate = totalComplaints > 0 ? ((escalatedComplaints / totalComplaints) * 100).toFixed(1) : "0.0"
+
+        // Calculate average resolution time
+        const resolvedComplaintsWithTime = await Complaint.find({
+          stakeholderOffice: office._id,
+          status: "resolved",
+          "resolution.resolvedAt": { $exists: true },
+        }).select("submittedAt resolution.resolvedAt")
+
+        let averageResolutionTime = 0
+        if (resolvedComplaintsWithTime.length > 0) {
+          const totalResolutionTime = resolvedComplaintsWithTime.reduce((sum, complaint) => {
+            const submittedAt = new Date(complaint.submittedAt)
+            const resolvedAt = new Date(complaint.resolution.resolvedAt)
+            const resolutionTime = (resolvedAt - submittedAt) / (1000 * 60 * 60 * 24) // in days
+            return sum + resolutionTime
+          }, 0)
+          averageResolutionTime = totalResolutionTime / resolvedComplaintsWithTime.length
+        }
+
+        return {
+          officeName: office.officeName,
+          officeType: office.officeType.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+          kifleketema: office.kifleketema.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+          wereda: office.wereda || "N/A",
+          totalComplaints,
+          resolvedComplaints,
+          escalatedComplaints,
+          responseRate,
+          escalationRate,
+          averageResolutionTime,
+        }
+      }),
+    )
+
+    // Filter out offices with no complaints if needed
+    const filteredPerformanceData = performanceData.filter((office) => office.totalComplaints > 0)
+
+    console.log("Performance data:", filteredPerformanceData.length, "offices with complaints")
+
+    res.json({
+      offices: filteredPerformanceData,
     })
-
-    res.json({ offices: officePerformance })
   } catch (err) {
-    console.error("Performance report error:", err)
+    console.error("Get office performance error:", err)
     res.status(500).json({ message: "Server error" })
   }
 })
