@@ -26,16 +26,24 @@ router.get("/dashboard/stats", auth, async (req, res) => {
 
     const query = {}
 
-    // Filter based on user role
+    // Filter based on user role - FIXED to include previously handled complaints
     if (req.user.role === USER_ROLES.STAKEHOLDER_OFFICE) {
-      // Stakeholder offices can only see complaints directed to them
+      // Stakeholder offices can see complaints directed to them
       query.stakeholderOffice = req.user.id
     } else if (req.user.role === USER_ROLES.WEREDA_ANTI_CORRUPTION) {
-      // Wereda officers can only see complaints at their level and in their wereda
+      // FIXED: Wereda officers can see complaints that are currently at their level OR have been at their level
       query.$or = [
         { currentHandler: COMPLAINT_HANDLERS.WEREDA_ANTI_CORRUPTION },
         {
           currentStage: { $in: [COMPLAINT_STAGES.WEREDA_FIRST, COMPLAINT_STAGES.WEREDA_SECOND] },
+        },
+        // Include complaints that have passed through wereda stage (escalated from wereda)
+        {
+          escalationHistory: {
+            $elemMatch: {
+              from: COMPLAINT_HANDLERS.WEREDA_ANTI_CORRUPTION,
+            },
+          },
         },
       ]
 
@@ -52,11 +60,19 @@ router.get("/dashboard/stats", auth, async (req, res) => {
         })
       }
     } else if (req.user.role === USER_ROLES.KIFLEKETEMA_ANTI_CORRUPTION) {
-      // Kifleketema officers can only see complaints at their level and in their kifleketema
+      // FIXED: Kifleketema officers can see complaints that are currently at their level OR have been at their level
       query.$or = [
         { currentHandler: COMPLAINT_HANDLERS.KIFLEKETEMA_ANTI_CORRUPTION },
         {
           currentStage: { $in: [COMPLAINT_STAGES.KIFLEKETEMA_FIRST, COMPLAINT_STAGES.KIFLEKETEMA_SECOND] },
+        },
+        // Include complaints that have passed through kifleketema stage (escalated from kifleketema)
+        {
+          escalationHistory: {
+            $elemMatch: {
+              from: COMPLAINT_HANDLERS.KIFLEKETEMA_ANTI_CORRUPTION,
+            },
+          },
         },
       ]
 
@@ -152,7 +168,7 @@ router.post("/", auth, upload.array("attachments", 5), async (req, res) => {
       const complaint = await Complaint.findOne({
         _id: originalComplaintId,
         user: req.user.id,
-      })
+      }).populate("responses.responder", "firstName lastName")
 
       if (!complaint) {
         return res.status(404).json({
@@ -160,20 +176,65 @@ router.post("/", auth, upload.array("attachments", 5), async (req, res) => {
         })
       }
 
-      // Check if the complaint is in the correct stage and has a response
+      console.log("=== SECOND STAGE VALIDATION DEBUG ===")
+      console.log("Complaint ID:", complaint._id)
+      console.log("Current Stage:", complaint.currentStage)
+      console.log("Current Handler:", complaint.currentHandler)
+      console.log("Current Status:", complaint.status)
+      console.log("Total Responses:", complaint.responses.length)
+
+      // Log all responses with their details
+      complaint.responses.forEach((response, index) => {
+        console.log(`Response ${index + 1}:`, {
+          responderRole: response.responderRole,
+          stage: response.stage,
+          status: response.status,
+          createdAt: response.createdAt,
+        })
+      })
+
+      // Check if the complaint is in the correct stage (first stage of any level)
       const isFirstStage = [
         COMPLAINT_STAGES.STAKEHOLDER_FIRST,
         COMPLAINT_STAGES.WEREDA_FIRST,
         COMPLAINT_STAGES.KIFLEKETEMA_FIRST,
       ].includes(complaint.currentStage)
 
-      const hasResponse =
-        complaint.responses && complaint.responses.some((r) => r.responderRole === complaint.currentHandler)
+      console.log("Is First Stage:", isFirstStage)
 
-      if (!isFirstStage || !hasResponse) {
+      if (!isFirstStage) {
         return res.status(400).json({
           message:
-            "This complaint is not eligible for a second stage submission. It must be in first stage and have a response from the current handler.",
+            "This complaint is not in a first stage. Second stage submissions are only allowed for first stage complaints.",
+        })
+      }
+
+      // FIXED: Enhanced response validation to handle escalated complaints
+      const hasResponseFromCurrentHandler = complaint.responses.some((r) => {
+        console.log(`Checking response: responderRole=${r.responderRole}, currentHandler=${complaint.currentHandler}`)
+        return r.responderRole === complaint.currentHandler
+      })
+
+      console.log("Has Response From Current Handler:", hasResponseFromCurrentHandler)
+
+      if (!hasResponseFromCurrentHandler) {
+        return res.status(400).json({
+          message: `This complaint is not eligible for a second stage submission. It must have a response from the current handler (${complaint.currentHandler}).`,
+        })
+      }
+
+      // FIXED: Allow second stage for escalated complaints too
+      const isEligibleStatus = [
+        COMPLAINT_STATUS.IN_PROGRESS,
+        COMPLAINT_STATUS.ESCALATED, // Allow escalated complaints
+        COMPLAINT_STATUS.PENDING,
+      ].includes(complaint.status)
+
+      console.log("Is Eligible Status:", isEligibleStatus)
+
+      if (!isEligibleStatus) {
+        return res.status(400).json({
+          message: "This complaint status does not allow second stage submission.",
         })
       }
 
@@ -198,10 +259,20 @@ router.post("/", auth, upload.array("attachments", 5), async (req, res) => {
         dueDate = new Date(now.getTime() + ESCALATION_TIMEFRAMES.KIFLEKETEMA_RESPONSE)
       }
 
+      console.log("Next Stage:", nextStage)
+      console.log("Next Handler:", nextHandler)
+
       // Update the existing complaint with second stage information
       complaint.currentStage = nextStage
       complaint.currentHandler = nextHandler
-      complaint.status = COMPLAINT_STATUS.PENDING
+
+      // FIXED: Keep escalated status if it was escalated, otherwise set to pending
+      if (complaint.status === COMPLAINT_STATUS.ESCALATED) {
+        complaint.status = COMPLAINT_STATUS.ESCALATED // Keep escalated status
+      } else {
+        complaint.status = COMPLAINT_STATUS.PENDING // Set to pending for normal flow
+      }
+
       complaint.additionalDetails = additionalDetails || ""
       complaint.updatedAt = now
 
@@ -214,18 +285,8 @@ router.post("/", auth, upload.array("attachments", 5), async (req, res) => {
         complaint.attachments = [...complaint.attachments, ...newAttachments]
       }
 
-      // Add to escalation history
-      if (nextHandler !== complaint.currentHandler) {
-        complaint.escalationHistory.push({
-          from: complaint.currentHandler,
-          to: nextHandler,
-          reason: "Escalated to next level by citizen",
-          date: now,
-        })
-      } else {
-        // We're just moving to second stage within the same office, no need for escalation history
-        console.log(`Moving to second stage within ${nextHandler}`)
-      }
+      console.log("Updated Status:", complaint.status)
+      console.log("=== END DEBUG ===")
 
       await complaint.save()
 
@@ -334,7 +395,7 @@ router.get("/", auth, async (req, res) => {
 
     const query = {}
 
-    // Filter based on user role
+    // FIXED: Filter based on user role - include previously handled complaints
     if (req.user.role === USER_ROLES.CITIZEN) {
       // Citizens can only see their own complaints
       query.user = req.user.id
@@ -342,10 +403,18 @@ router.get("/", auth, async (req, res) => {
       // Stakeholder offices can only see complaints directed to them
       query.stakeholderOffice = req.user.id
     } else if (req.user.role === USER_ROLES.WEREDA_ANTI_CORRUPTION) {
-      // Wereda officers can see complaints at their level or with their handler
+      // FIXED: Wereda officers can see complaints that are currently at their level OR have been at their level
       query.$or = [
         { currentHandler: COMPLAINT_HANDLERS.WEREDA_ANTI_CORRUPTION },
         { currentStage: { $in: [COMPLAINT_STAGES.WEREDA_FIRST, COMPLAINT_STAGES.WEREDA_SECOND] } },
+        // Include complaints that have passed through wereda stage (escalated from wereda)
+        {
+          escalationHistory: {
+            $elemMatch: {
+              from: COMPLAINT_HANDLERS.WEREDA_ANTI_CORRUPTION,
+            },
+          },
+        },
       ]
 
       // Only add location filters if they exist
@@ -371,10 +440,18 @@ router.get("/", auth, async (req, res) => {
         console.log(`Filtering for wereda: ${weredaNum} (${typeof weredaNum})`)
       }
     } else if (req.user.role === USER_ROLES.KIFLEKETEMA_ANTI_CORRUPTION) {
-      // Kifleketema officers can see complaints at their level or with their handler
+      // FIXED: Kifleketema officers can see complaints that are currently at their level OR have been at their level
       query.$or = [
         { currentHandler: COMPLAINT_HANDLERS.KIFLEKETEMA_ANTI_CORRUPTION },
         { currentStage: { $in: [COMPLAINT_STAGES.KIFLEKETEMA_FIRST, COMPLAINT_STAGES.KIFLEKETEMA_SECOND] } },
+        // Include complaints that have passed through kifleketema stage (escalated from kifleketema)
+        {
+          escalationHistory: {
+            $elemMatch: {
+              from: COMPLAINT_HANDLERS.KIFLEKETEMA_ANTI_CORRUPTION,
+            },
+          },
+        },
       ]
 
       // Only add kifleketema filter if it exists
@@ -425,6 +502,7 @@ router.get("/", auth, async (req, res) => {
           kifleketema: c.kifleketema,
           wereda: c.wereda,
           weredaType: typeof c.wereda,
+          escalationHistory: c.escalationHistory?.length || 0,
         })),
       )
     }
@@ -476,9 +554,11 @@ router.get("/:id", auth, async (req, res) => {
     } else if (
       req.user.role === USER_ROLES.WEREDA_ANTI_CORRUPTION &&
       (complaint.currentHandler === COMPLAINT_HANDLERS.WEREDA_ANTI_CORRUPTION ||
-        [COMPLAINT_STAGES.WEREDA_FIRST, COMPLAINT_STAGES.WEREDA_SECOND].includes(complaint.currentStage))
+        [COMPLAINT_STAGES.WEREDA_FIRST, COMPLAINT_STAGES.WEREDA_SECOND].includes(complaint.currentStage) ||
+        // FIXED: Allow viewing complaints that were escalated from wereda
+        complaint.escalationHistory?.some((esc) => esc.from === COMPLAINT_HANDLERS.WEREDA_ANTI_CORRUPTION))
     ) {
-      // Wereda officers can view complaints at their level
+      // Wereda officers can view complaints at their level or that they previously handled
       // Only check location if user has location data
       if (req.user.kifleketema && req.user.wereda) {
         // Convert wereda to number for consistent comparison
@@ -496,9 +576,11 @@ router.get("/:id", auth, async (req, res) => {
     } else if (
       req.user.role === USER_ROLES.KIFLEKETEMA_ANTI_CORRUPTION &&
       (complaint.currentHandler === COMPLAINT_HANDLERS.KIFLEKETEMA_ANTI_CORRUPTION ||
-        [COMPLAINT_STAGES.KIFLEKETEMA_FIRST, COMPLAINT_STAGES.KIFLEKETEMA_SECOND].includes(complaint.currentStage))
+        [COMPLAINT_STAGES.KIFLEKETEMA_FIRST, COMPLAINT_STAGES.KIFLEKETEMA_SECOND].includes(complaint.currentStage) ||
+        // FIXED: Allow viewing complaints that were escalated from kifleketema
+        complaint.escalationHistory?.some((esc) => esc.from === COMPLAINT_HANDLERS.KIFLEKETEMA_ANTI_CORRUPTION))
     ) {
-      // Kifleketema officers can view complaints at their level
+      // Kifleketema officers can view complaints at their level or that they previously handled
       // Only check location if user has location data
       if (req.user.kifleketema) {
         hasPermission = complaint.kifleketema === req.user.kifleketema
@@ -732,7 +814,18 @@ router.post("/:id/escalate", auth, async (req, res) => {
     // Update complaint
     complaint.currentStage = nextStage
     complaint.currentHandler = nextHandler
-    complaint.status = COMPLAINT_STATUS.ESCALATED // Set to ESCALATED instead of PENDING when escalating
+
+    // FIXED: Keep escalated status for dashboard counting
+    if (fromStage && toStage) {
+      // This is a real escalation to a new handler - set to escalated
+      complaint.status = COMPLAINT_STATUS.ESCALATED
+      console.log(`Real escalation from ${fromStage} to ${toStage} - setting status to escalated`)
+    } else {
+      // This is just moving to second stage within same handler - keep current status or set to pending
+      complaint.status = COMPLAINT_STATUS.PENDING
+      console.log(`Same handler escalation - setting status to pending`)
+    }
+
     complaint.updatedAt = now
 
     // Set new due date if applicable
@@ -750,7 +843,7 @@ router.post("/:id/escalate", auth, async (req, res) => {
       complaint[dueDateField] = dueDate
     }
 
-    // Add to escalation history if moving to a new handler
+    // Add to escalation history and record metrics
     if (fromStage && toStage) {
       const reason = req.body.reason || "Escalated due to unresolved complaint"
 
@@ -944,14 +1037,13 @@ router.post("/:id/respond", auth, async (req, res) => {
       })
     }
 
-    // FIXED: Preserve escalated status when responding to escalated complaints
-    // Determine the new status based on current status and stage
+    // FIXED: Handle escalated complaints properly
     let newStatus
-    
-    // If the complaint was escalated, keep it as escalated until citizen takes action
+
+    // If the complaint was escalated, set to in_progress when admin responds
     if (complaint.status === COMPLAINT_STATUS.ESCALATED) {
-      newStatus = COMPLAINT_STATUS.ESCALATED
-      console.log("Preserving escalated status after admin response")
+      newStatus = COMPLAINT_STATUS.IN_PROGRESS
+      console.log("Escalated complaint - setting status to in_progress after admin response")
     } else {
       // For non-escalated complaints, set to in_progress when admin responds
       newStatus = COMPLAINT_STATUS.IN_PROGRESS
