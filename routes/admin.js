@@ -101,6 +101,36 @@ router.get("/pending-admins", auth, async (req, res) => {
   }
 })
 
+// @route   GET api/admin/all-admins
+// @desc    Get all administrators (with optional filtering)
+// @access  Private (Kentiba Biro only)
+router.get("/all-admins", auth, async (req, res) => {
+  try {
+    // Check if user is Kentiba Biro
+    if (req.user.role !== USER_ROLES.KENTIBA_BIRO) {
+      return res.status(403).json({ message: "Not authorized" })
+    }
+
+    const query = {
+      role: { $in: [USER_ROLES.WEREDA_ANTI_CORRUPTION, USER_ROLES.KIFLEKETEMA_ANTI_CORRUPTION] },
+    }
+
+    // Filter by approval status if provided
+    if (req.query.approved === "true") {
+      query.isApproved = true
+    } else if (req.query.approved === "false") {
+      query.isApproved = false
+    }
+
+    const admins = await User.find(query).select("-password").sort({ createdAt: -1 })
+
+    res.json({ admins })
+  } catch (err) {
+    console.error("Get all admins error:", err)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
 // @route   PUT api/admin/:id/approve
 // @desc    Approve an administrator
 // @access  Private (Kentiba Biro only)
@@ -175,6 +205,36 @@ router.put("/:id/reject", auth, async (req, res) => {
     res.json({ message: "Administrator rejected and removed" })
   } catch (err) {
     console.error("Reject admin error:", err)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+// @route   DELETE api/admin/:id/delete
+// @desc    Delete an administrator (for when they leave their job)
+// @access  Private (Kentiba Biro only)
+router.delete("/:id/delete", auth, async (req, res) => {
+  try {
+    // Check if user is Kentiba Biro
+    if (req.user.role !== USER_ROLES.KENTIBA_BIRO) {
+      return res.status(403).json({ message: "Not authorized" })
+    }
+
+    const admin = await User.findById(req.params.id)
+
+    if (!admin) {
+      return res.status(404).json({ message: "Administrator not found" })
+    }
+
+    if (![USER_ROLES.WEREDA_ANTI_CORRUPTION, USER_ROLES.KIFLEKETEMA_ANTI_CORRUPTION].includes(admin.role)) {
+      return res.status(400).json({ message: "User is not a Wereda or Kifleketema administrator" })
+    }
+
+    // Delete the admin
+    await User.deleteOne({ _id: req.params.id })
+
+    res.json({ message: "Administrator deleted successfully" })
+  } catch (err) {
+    console.error("Delete admin error:", err)
     res.status(500).json({ message: "Server error" })
   }
 })

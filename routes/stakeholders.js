@@ -202,4 +202,34 @@ router.put("/:id/reject", auth, async (req, res) => {
   }
 })
 
+// @route   DELETE api/stakeholders/:id/delete
+// @desc    Delete a stakeholder office (for when they leave their job)
+// @access  Private (Kentiba Biro only)
+router.delete("/:id/delete", auth, async (req, res) => {
+  try {
+    // Check if user is Kentiba Biro
+    if (req.user.role !== USER_ROLES.KENTIBA_BIRO) {
+      return res.status(403).json({ message: "Not authorized" })
+    }
+
+    const stakeholder = await User.findById(req.params.id)
+
+    if (!stakeholder) {
+      return res.status(404).json({ message: "Stakeholder office not found" })
+    }
+
+    if (stakeholder.role !== USER_ROLES.STAKEHOLDER_OFFICE) {
+      return res.status(400).json({ message: "User is not a stakeholder office" })
+    }
+
+    // Delete the stakeholder
+    await User.deleteOne({ _id: req.params.id })
+
+    res.json({ message: "Stakeholder office deleted successfully" })
+  } catch (err) {
+    console.error("Delete stakeholder error:", err)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
 module.exports = router
