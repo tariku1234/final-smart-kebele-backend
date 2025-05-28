@@ -17,7 +17,8 @@ const officeRoutes = require("./routes/offices")
 const stakeholderRoutes = require("./routes/stakeholders")
 const blogRoutes = require("./routes/blog")
 const adminRoutes = require("./routes/admin")
-const reportRoutes = require("./routes/reports") // Add the new reports route
+const reportRoutes = require("./routes/reports")
+const commentRoutes = require("./routes/comments") // Add comments route
 
 // Initialize Express app
 const app = express()
@@ -57,7 +58,8 @@ app.use("/api/alerts", alertRoutes)
 app.use("/api/offices", officeRoutes)
 app.use("/api/stakeholders", stakeholderRoutes)
 app.use("/api/blog", blogRoutes)
-app.use("/api/reports", reportRoutes) // Register the new reports route
+app.use("/api/reports", reportRoutes)
+app.use("/api/comments", commentRoutes) // Register comments route
 
 // Serve static assets in production
 if (process.env.NODE_ENV === "production") {
