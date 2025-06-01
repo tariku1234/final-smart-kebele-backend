@@ -55,7 +55,7 @@ const getPasswordResetTemplate = (resetToken, userFirstName) => {
             }
             .reset-button {
                 display: inline-block;
-                background-color: #2563eb;
+                background-color::rgb(126, 156, 219);
                 color: white;
                 padding: 12px 30px;
                 text-decoration: none;
