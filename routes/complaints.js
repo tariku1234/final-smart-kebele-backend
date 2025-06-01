@@ -13,6 +13,11 @@ const {
   COMPLAINT_STATUS,
   ESCALATION_TIMEFRAMES,
 } = require("../config/constants")
+const {
+  sendResponseNotificationEmail,
+  sendEscalationNotificationEmail,
+  sendResolutionNotificationEmail,
+} = require("../utils/emailNotificationService")
 
 // @route   GET api/complaints/dashboard/stats
 // @desc    Get complaint statistics for dashboard
@@ -644,6 +649,34 @@ router.post("/:id/accept", auth, async (req, res) => {
     complaint.updatedAt = new Date()
     await complaint.save()
 
+    // FIXED: Send resolution notification email asynchronously (non-blocking)
+    setImmediate(async () => {
+      try {
+        // Get the populated user data
+        const populatedComplaint = await Complaint.findById(complaint._id)
+          .populate("user", "firstName lastName email")
+          .populate("responses.responder", "firstName lastName")
+
+        if (populatedComplaint.user && populatedComplaint.user.email) {
+          const latestResponse = populatedComplaint.responses[populatedComplaint.responses.length - 1]
+
+          await sendResolutionNotificationEmail(
+            populatedComplaint.user.email,
+            populatedComplaint.user.firstName,
+            populatedComplaint,
+            {
+              resolverName: latestResponse.responder
+                ? `${latestResponse.responder.firstName} ${latestResponse.responder.lastName}`
+                : "Administrator",
+              resolverRole: latestResponse.responderRole,
+            },
+          )
+        }
+      } catch (emailError) {
+        console.error("Background resolution email error:", emailError)
+      }
+    })
+
     // Update office performance metrics if applicable
     if (latestResponse.responder) {
       const officeId = latestResponse.responder
@@ -938,6 +971,35 @@ router.post("/:id/escalate", auth, async (req, res) => {
 
     await complaint.save()
 
+    // FIXED: Send escalation notification email asynchronously (non-blocking) for real escalations
+    if (fromStage && toStage) {
+      setImmediate(async () => {
+        try {
+          // Get the populated user data
+          const populatedComplaint = await Complaint.findById(complaint._id).populate(
+            "user",
+            "firstName lastName email",
+          )
+
+          if (populatedComplaint.user && populatedComplaint.user.email) {
+            await sendEscalationNotificationEmail(
+              populatedComplaint.user.email,
+              populatedComplaint.user.firstName,
+              populatedComplaint,
+              {
+                from: fromHandler,
+                to: nextHandler,
+                reason: req.body.reason || "Escalated due to unresolved complaint",
+                isAutomatic: false,
+              },
+            )
+          }
+        } catch (emailError) {
+          console.error("Background escalation email error:", emailError)
+        }
+      })
+    }
+
     res.json({
       message: "Complaint escalated successfully",
       complaint,
@@ -1069,6 +1131,37 @@ router.post("/:id/respond", auth, async (req, res) => {
 
     await complaint.save()
 
+    // FIXED: Send response notification email asynchronously (non-blocking)
+    setImmediate(async () => {
+      try {
+        // Get the populated user data first
+        const populatedComplaint = await Complaint.findById(complaint._id)
+          .populate("user", "firstName lastName email")
+          .populate("stakeholderOffice", "officeName officeType")
+
+        if (populatedComplaint.user && populatedComplaint.user.email) {
+          // Get responder info
+          const responder = await User.findById(req.user.id)
+
+          const responseWithResponder = {
+            responder: responder,
+            response: response,
+            createdAt: new Date(),
+          }
+
+          await sendResponseNotificationEmail(
+            populatedComplaint.user.email,
+            populatedComplaint.user.firstName,
+            populatedComplaint,
+            responseWithResponder,
+          )
+        }
+      } catch (emailError) {
+        console.error("Background response email error:", emailError)
+      }
+    })
+
+    // Respond immediately to the user without waiting for email
     res.json({
       message: "Response submitted successfully",
       complaint,
