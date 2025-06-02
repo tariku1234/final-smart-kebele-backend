@@ -16,7 +16,7 @@ const BlogPostSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: ["announcement", "news", "guide", "success_story", "other"],
+    enum: ["announcement", "news", "guide", "success_story", "alert_news", "other"],
     default: "announcement",
   },
   tags: [String],
@@ -33,7 +33,11 @@ const BlogPostSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  // Track if alert notification has been sent
+  alertNotificationSent: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 module.exports = mongoose.model("BlogPost", BlogPostSchema)
-

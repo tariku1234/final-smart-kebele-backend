@@ -6,6 +6,7 @@ const fs = require("fs")
 const BlogPost = require("../models/BlogPost")
 const auth = require("../middleware/auth")
 const { USER_ROLES } = require("../config/constants")
+const { sendAlertNewsToAllCitizens } = require("../utils/alertNotificationService")
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -94,9 +95,31 @@ router.post("/", auth, upload.single("featuredImage"), async (req, res) => {
     // Populate the author field before sending the response
     await blogPost.populate("author", "firstName lastName")
 
+    // Send alert news notification if category is "alert_news" and post is published
+    if (category === "alert_news" && isPublished === "true") {
+      console.log("Alert news blog post created, sending notifications...")
+
+      // Send notifications in the background
+      sendAlertNewsToAllCitizens(blogPost)
+        .then((result) => {
+          console.log("Alert news notification result:", result)
+          // Mark notification as sent
+          BlogPost.findByIdAndUpdate(blogPost._id, { alertNotificationSent: true }).catch((err) =>
+            console.error("Error updating notification status:", err),
+          )
+        })
+        .catch((error) => {
+          console.error("Error sending alert news notifications:", error)
+        })
+    }
+
     res.status(201).json({
       message: "Blog post created successfully",
       blogPost,
+      alertNotification:
+        category === "alert_news" && isPublished === "true"
+          ? "Alert news notifications are being sent to all citizens"
+          : null,
     })
   } catch (err) {
     console.error("Create blog post error:", err.message, err.stack)
@@ -210,6 +233,10 @@ router.put("/:id", auth, upload.single("featuredImage"), async (req, res) => {
       return res.status(404).json({ message: "Blog post not found" })
     }
 
+    // Check if this is becoming an alert news and wasn't before, or if it's being published for the first time
+    const shouldSendAlert =
+      category === "alert_news" && isPublished === "true" && (!blogPost.alertNotificationSent || !blogPost.isPublished)
+
     // Update blog post
     blogPost.title = title
     blogPost.content = content
@@ -226,9 +253,28 @@ router.put("/:id", auth, upload.single("featuredImage"), async (req, res) => {
 
     await blogPost.save()
 
+    // Send alert news notification if conditions are met
+    if (shouldSendAlert) {
+      console.log("Updated blog post is alert news, sending notifications...")
+
+      // Send notifications in the background
+      sendAlertNewsToAllCitizens(blogPost)
+        .then((result) => {
+          console.log("Alert news notification result:", result)
+          // Mark notification as sent
+          BlogPost.findByIdAndUpdate(blogPost._id, { alertNotificationSent: true }).catch((err) =>
+            console.error("Error updating notification status:", err),
+          )
+        })
+        .catch((error) => {
+          console.error("Error sending alert news notifications:", error)
+        })
+    }
+
     res.json({
       message: "Blog post updated successfully",
       blogPost,
+      alertNotification: shouldSendAlert ? "Alert news notifications are being sent to all citizens" : null,
     })
   } catch (err) {
     console.error("Update blog post error:", err)
