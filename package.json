@@ -15,6 +15,7 @@
   "dependencies": {
     "@google-cloud/translate": "^9.1.0",
     "bcryptjs": "^3.0.2",
+    "cloudinary": "^1.41.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
@@ -22,6 +23,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.12.1",
     "multer": "^2.0.0",
+    "multer-storage-cloudinary": "^4.0.0",
     "node-cron": "^4.0.7",
     "nodemailer": "^6.10.1"
   },

@@ -3,6 +3,8 @@ const mongoose = require("mongoose")
 const cors = require("cors")
 const dotenv = require("dotenv")
 const path = require("path")
+const bodyParser = require("body-parser")
+
 const fs = require("fs")
 
 // Load environment variables
@@ -48,7 +50,8 @@ mongoose
   })
   .then(() => console.log("MongoDB connected"))
   .catch((err) => console.error("MongoDB connection error:", err))
-
+app.use(bodyParser.json())
+app.use(bodyParser.urlencoded({ extended: true }))
 // Routes
 app.use("/api/auth", authRoutes)
 app.use("/api/admin", adminRoutes)
@@ -74,6 +77,8 @@ if (process.env.NODE_ENV === "production") {
 // Scheduled tasks for automatic escalation
 const { scheduleEscalationJobs } = require("./utils/scheduler")
 scheduleEscalationJobs()
+
+
 
 // Error handling middleware
 app.use((err, req, res, next) => {

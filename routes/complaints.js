@@ -1,7 +1,14 @@
 const express = require("express")
 const router = express.Router()
-const multer = require("multer")
-const path = require("path")
+const { createBase64Upload } = require("../middleware/base64Upload")
+const { isBase64DataUrl, isFilePath } = require("../utils/base64FileHandler")
+
+// Create Base64 upload middleware for complaints
+const { upload, convertToBase64 } = createBase64Upload({
+  maxFileSize: 10 * 1024 * 1024, // 10MB
+  allowedTypes: "all",
+  maxFiles: 5,
+})
 const Complaint = require("../models/Complaint")
 const User = require("../models/User")
 const OfficePerformance = require("../models/OfficePerformance")
@@ -112,38 +119,10 @@ router.get("/dashboard/stats", auth, async (req, res) => {
   }
 })
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/complaints")
-  },
-  filename: (req, file, cb) => {
-    // Use timestamp + sanitized filename to avoid conflicts
-    const sanitizedName = file.originalname.replace(/\s+/g, "-").toLowerCase()
-    cb(null, `${Date.now()}-${sanitizedName}`)
-  },
-})
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx/
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase())
-    const mimetype = allowedTypes.test(file.mimetype)
-
-    if (extname && mimetype) {
-      return cb(null, true)
-    } else {
-      cb(new Error("Invalid file type. Only JPEG, PNG, GIF, PDF, DOC, and DOCX files are allowed."))
-    }
-  },
-})
-
 // @route   POST api/complaints
 // @desc    Create a new complaint (first stage) or update existing complaint to second stage
 // @access  Private (Citizen only)
-router.post("/", auth, upload.array("attachments", 5), async (req, res) => {
+router.post("/", auth, upload.array("attachments", 5), convertToBase64, async (req, res) => {
   try {
     // Check if user is a citizen
     if (req.user.role !== USER_ROLES.CITIZEN) {
@@ -284,9 +263,9 @@ router.post("/", auth, upload.array("attachments", 5), async (req, res) => {
       // Set due date
       complaint[dueDateField] = dueDate
 
-      // Add new attachments if any
-      if (req.files && req.files.length > 0) {
-        const newAttachments = req.files.map((file) => file.path)
+      // Add new attachments if any (now using Base64)
+      if (req.base64Files && req.base64Files.length > 0) {
+        const newAttachments = req.base64Files.map((file) => file.data)
         complaint.attachments = [...complaint.attachments, ...newAttachments]
       }
 
@@ -346,9 +325,9 @@ router.post("/", auth, upload.array("attachments", 5), async (req, res) => {
         location,
       })
 
-      // Add attachments if any
-      if (req.files && req.files.length > 0) {
-        complaint.attachments = req.files.map((file) => file.path)
+      // Add attachments if any (now using Base64)
+      if (req.base64Files && req.base64Files.length > 0) {
+        complaint.attachments = req.base64Files.map((file) => file.data)
       }
 
       // Set due dates

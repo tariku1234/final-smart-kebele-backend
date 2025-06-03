@@ -1,47 +1,19 @@
 const express = require("express")
 const router = express.Router()
-const multer = require("multer")
 const path = require("path")
 const fs = require("fs")
 const BlogPost = require("../models/BlogPost")
 const auth = require("../middleware/auth")
 const { USER_ROLES } = require("../config/constants")
 const { sendAlertNewsToAllCitizens } = require("../utils/alertNotificationService")
+const { createBase64Upload } = require("../middleware/base64Upload")
+const { isBase64DataUrl, isFilePath } = require("../utils/base64FileHandler")
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // Ensure the directory exists with absolute path
-    const uploadDir = path.join(__dirname, "../../uploads/blog")
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true })
-    }
-    cb(null, "uploads/blog")
-  },
-  filename: (req, file, cb) => {
-    // Create a unique filename to avoid conflicts
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9)
-    // Replace spaces with hyphens and remove special characters
-    const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.]/g, "-").toLowerCase()
-    cb(null, `${uniqueSuffix}-${sanitizedName}`)
-  },
-})
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
-  fileFilter: (req, file, cb) => {
-    // Allow images and videos
-    const allowedTypes = /jpeg|jpg|png|gif|mp4|webm|ogg/
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase())
-    const mimetype = allowedTypes.test(file.mimetype)
-
-    if (extname && mimetype) {
-      return cb(null, true)
-    } else {
-      cb(new Error("Invalid file type. Only JPEG, PNG, GIF images and MP4, WebM, OGG videos are allowed."))
-    }
-  },
+// Create Base64 upload middleware for blog images
+const { upload, convertToBase64 } = createBase64Upload({
+  maxFileSize: 10 * 1024 * 1024, // 10MB
+  allowedTypes: "all",
+  maxFiles: 1,
 })
 
 // Add specific routes BEFORE the parameterized routes
@@ -60,7 +32,7 @@ router.get("/create", auth, (req, res) => {
 // @route   POST api/blog
 // @desc    Create a new blog post
 // @access  Private (Kentiba Biro only)
-router.post("/", auth, upload.single("featuredImage"), async (req, res) => {
+router.post("/", auth, upload.single("featuredImage"), convertToBase64, async (req, res) => {
   try {
     // Check if user is Kentiba Biro
     if (req.user.role !== USER_ROLES.KENTIBA_BIRO) {
@@ -83,11 +55,9 @@ router.post("/", auth, upload.single("featuredImage"), async (req, res) => {
       isPublished: isPublished === "true",
     })
 
-    // Add featured image if uploaded
-    if (req.file) {
-      // Store the URL path that will be accessible from the frontend
-      // This path will be relative to the domain, e.g., /uploads/blog/filename.jpg
-      blogPost.featuredImage = `/uploads/blog/${req.file.filename}`
+    // Add featured image if uploaded (now using Base64)
+    if (req.base64File) {
+      blogPost.featuredImage = req.base64File.data
     }
 
     await blogPost.save()
@@ -213,7 +183,7 @@ router.get("/:id", async (req, res) => {
 // @route   PUT api/blog/:id
 // @desc    Update a blog post
 // @access  Private (Kentiba Biro only)
-router.put("/:id", auth, upload.single("featuredImage"), async (req, res) => {
+router.put("/:id", auth, upload.single("featuredImage"), convertToBase64, async (req, res) => {
   try {
     // Check if user is Kentiba Biro
     if (req.user.role !== USER_ROLES.KENTIBA_BIRO) {
@@ -245,10 +215,9 @@ router.put("/:id", auth, upload.single("featuredImage"), async (req, res) => {
     blogPost.isPublished = isPublished === "true"
     blogPost.updatedAt = new Date()
 
-    // Update featured image if uploaded
-    if (req.file) {
-      // Store the URL path that will be accessible from the frontend
-      blogPost.featuredImage = `/uploads/blog/${req.file.filename}`
+    // Update featured image if uploaded (now using Base64)
+    if (req.base64File) {
+      blogPost.featuredImage = req.base64File.data
     }
 
     await blogPost.save()
@@ -301,14 +270,6 @@ router.delete("/:id", auth, async (req, res) => {
 
     if (!blogPost) {
       return res.status(404).json({ message: "Blog post not found" })
-    }
-
-    // Delete the image file if it exists
-    if (blogPost.featuredImage) {
-      const filePath = path.join(__dirname, "../../", blogPost.featuredImage.replace(/^\//, ""))
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath)
-      }
     }
 
     await BlogPost.deleteOne({ _id: req.params.id })
